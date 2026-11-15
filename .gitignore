@@ -1,0 +1,8 @@
+# compiled classes
+out/
+*.class
+
+# files created while the program runs
+output/*
+!output/.gitkeep
+sources.txt
