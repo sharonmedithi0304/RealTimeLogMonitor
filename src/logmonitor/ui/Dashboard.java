@@ -4,8 +4,15 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.Graphics;
+import java.awt.Rectangle;
 import java.awt.GridLayout;
 import java.awt.FlowLayout;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.IOException;
@@ -13,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
@@ -26,9 +34,11 @@ import javax.swing.JSplitPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
-import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
+import javax.swing.plaf.basic.BasicButtonUI;
+import javax.swing.plaf.basic.BasicGraphicsUtils;
+import javax.swing.plaf.basic.BasicScrollBarUI;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 
@@ -93,6 +103,7 @@ public class Dashboard extends JFrame {
     private JLabel statusLabel;
     private JLabel threadLabel;
     private JComboBox<String> levelCombo;
+    private JComboBox<String> sourceCombo;
     private JTextField searchField;
     private JCheckBox autoScroll;
     private JTextArea statsArea;
@@ -224,13 +235,168 @@ public class Dashboard extends JFrame {
     }
 
     private void styleButton(JButton button, boolean primary) {
+        // Use BasicButtonUI so the active Windows look-and-feel cannot replace
+        // our disabled text/background colors with its pale default rendering.
+        button.setUI(new ReadableButtonUI());
         button.setFont(new Font("Segoe UI", Font.BOLD, 11));
-        button.setForeground(primary ? new Color(7, 19, 32) : TEXT);
-        button.setBackground(primary ? CYAN : PANEL_ALT);
         button.setFocusPainted(false);
-        button.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(primary ? CYAN : LINE), new EmptyBorder(8, 13, 8, 13)));
+        button.setContentAreaFilled(true);
+        button.setOpaque(true);
+        button.setBorderPainted(true);
+        button.setRolloverEnabled(true);
         button.setCursor(new java.awt.Cursor(java.awt.Cursor.HAND_CURSOR));
+
+        java.awt.Insets padding = new java.awt.Insets(8, 14, 8, 14);
+        button.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(primary ? CYAN : LINE),
+                new EmptyBorder(padding.top, padding.left, padding.bottom, padding.right)));
+
+        // Size each button from its actual label instead of forcing every
+        // action into 140 px (which truncated labels such as Stop monitoring).
+        FontMetrics metrics = button.getFontMetrics(button.getFont());
+        int labelWidth = metrics.stringWidth(button.getText());
+        int buttonWidth = Math.max(120, labelWidth + padding.left + padding.right + 8);
+        java.awt.Dimension buttonSize = new java.awt.Dimension(buttonWidth, 40);
+        button.setMinimumSize(buttonSize);
+        button.setPreferredSize(buttonSize);
+        button.setMaximumSize(buttonSize);
+
+        button.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                if (button.isEnabled()) {
+                    button.setBackground(primary ? new Color(86, 211, 255) : new Color(39, 53, 71));
+                    button.setBorder(BorderFactory.createCompoundBorder(
+                            BorderFactory.createLineBorder(primary ? new Color(118, 225, 255) : new Color(94, 117, 145)),
+                            new EmptyBorder(padding.top, padding.left, padding.bottom, padding.right)));
+                }
+            }
+
+            @Override
+            public void mouseExited(MouseEvent e) {
+                updateButtonState(button, primary);
+            }
+        });
+        button.addFocusListener(new FocusAdapter() {
+            @Override
+            public void focusGained(FocusEvent e) {
+                if (button.isEnabled()) {
+                    button.setBorder(BorderFactory.createCompoundBorder(
+                            BorderFactory.createLineBorder(primary ? new Color(118, 225, 255) : new Color(94, 117, 145), 2),
+                            new EmptyBorder(padding.top - 1, padding.left - 1, padding.bottom - 1, padding.right - 1)));
+                }
+            }
+
+            @Override
+            public void focusLost(FocusEvent e) {
+                updateButtonState(button, primary);
+            }
+        });
+        button.addPropertyChangeListener(evt -> {
+            if ("enabled".equals(evt.getPropertyName())) {
+                updateButtonState(button, primary);
+            }
+        });
+        updateButtonState(button, primary);
+    }
+
+    /** Paints disabled button text using the button's explicit foreground color. */
+    private static final class ReadableButtonUI extends BasicButtonUI {
+        @Override
+        protected void paintText(Graphics g, AbstractButton button,
+                Rectangle textRect, String text) {
+            Color previous = g.getColor();
+            g.setColor(button.getForeground());
+            FontMetrics metrics = g.getFontMetrics(button.getFont());
+            BasicGraphicsUtils.drawStringUnderlineCharAt(g, text,
+                    button.getDisplayedMnemonicIndex(), textRect.x,
+                    textRect.y + metrics.getAscent());
+            g.setColor(previous);
+        }
+    }
+
+    private void updateButtonState(JButton button, boolean primary) {
+        if (!button.isEnabled()) {
+            // Dark disabled surface + readable slate text. ReadableButtonUI
+            // ensures Swing's look-and-feel does not fade this foreground.
+            button.setBackground(new Color(43, 55, 70));
+            button.setForeground(new Color(218, 229, 242));
+            button.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(new Color(83, 103, 126)),
+                    new EmptyBorder(8, 14, 8, 14)));
+            button.setCursor(java.awt.Cursor.getDefaultCursor());
+        } else {
+            button.setBackground(primary ? CYAN : PANEL_ALT);
+            button.setForeground(primary ? new Color(7, 19, 32) : TEXT);
+            button.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(primary ? CYAN : LINE),
+                    new EmptyBorder(8, 14, 8, 14)));
+            button.setCursor(new java.awt.Cursor(java.awt.Cursor.HAND_CURSOR));
+        }
+        button.repaint();
+    }
+
+    private void styleScrollPane(JScrollPane scroll) {
+        scroll.setBorder(BorderFactory.createLineBorder(LINE));
+        scroll.getViewport().setBackground(new Color(9, 15, 26));
+        scroll.getVerticalScrollBar().setBackground(new Color(17, 24, 36));
+        scroll.getHorizontalScrollBar().setBackground(new Color(17, 24, 36));
+        scroll.getVerticalScrollBar().setUI(new DarkScrollBarUI());
+        scroll.getHorizontalScrollBar().setUI(new DarkScrollBarUI());
+        scroll.getVerticalScrollBar().setOpaque(true);
+        scroll.getHorizontalScrollBar().setOpaque(true);
+    }
+
+    private static final class DarkScrollBarUI extends BasicScrollBarUI {
+        @Override
+        protected void configureScrollBarColors() {
+            trackColor = new Color(17, 24, 36);
+            thumbColor = new Color(82, 101, 121);
+        }
+
+        @Override
+        public java.awt.Dimension getPreferredSize(javax.swing.JComponent c) {
+            return new java.awt.Dimension(12, 12);
+        }
+
+        @Override
+        protected JButton createDecreaseButton(int orientation) {
+            return createArrowButton();
+        }
+
+        @Override
+        protected JButton createIncreaseButton(int orientation) {
+            return createArrowButton();
+        }
+
+        private JButton createArrowButton() {
+            JButton button = new JButton();
+            button.setBackground(new Color(17, 24, 36));
+            button.setBorder(BorderFactory.createEmptyBorder());
+            button.setContentAreaFilled(false);
+            button.setOpaque(false);
+            return button;
+        }
+
+        @Override
+        protected void paintTrack(java.awt.Graphics g, javax.swing.JComponent c, java.awt.Rectangle trackBounds) {
+            g.setColor(trackColor);
+            g.fillRect(trackBounds.x, trackBounds.y, trackBounds.width, trackBounds.height);
+        }
+
+        @Override
+        protected void paintThumb(java.awt.Graphics g, javax.swing.JComponent c, java.awt.Rectangle thumbBounds) {
+            if (thumbBounds.isEmpty() || !c.isEnabled()) {
+                return;
+            }
+            java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
+            g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                    java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(thumbColor);
+            g2.fillRoundRect(thumbBounds.x + 2, thumbBounds.y + 2, thumbBounds.width - 4, thumbBounds.height - 4, 8, 8);
+            g2.dispose();
+        }
+
     }
 
     private JPanel buildLogPanel() {
@@ -239,6 +405,12 @@ public class Dashboard extends JFrame {
         levelCombo.setToolTipText("WARN+ shows WARN and ERROR");
         levelCombo.addActionListener(e -> rebuildTable());
         styleInput(levelCombo);
+
+        sourceCombo = new JComboBox<>();
+        updateSourceCombo();
+        sourceCombo.setToolTipText("Filter by log source");
+        sourceCombo.addActionListener(e -> rebuildTable());
+        styleInput(sourceCombo);
 
         searchField = new JTextField(17);
         searchField.addActionListener(e -> rebuildTable());
@@ -252,6 +424,7 @@ public class Dashboard extends JFrame {
         resetButton.addActionListener(e -> {
             searchField.setText("");
             levelCombo.setSelectedIndex(0);
+            sourceCombo.setSelectedItem("ALL SOURCES");
             rebuildTable();
         });
         autoScroll = new JCheckBox("Auto-scroll", true);
@@ -264,11 +437,16 @@ public class Dashboard extends JFrame {
         JLabel levelLabel = new JLabel("SEVERITY");
         levelLabel.setForeground(MUTED);
         levelLabel.setFont(new Font("Segoe UI", Font.BOLD, 10));
+        JLabel sourceLabel = new JLabel("SOURCE");
+        sourceLabel.setForeground(MUTED);
+        sourceLabel.setFont(new Font("Segoe UI", Font.BOLD, 10));
         JLabel searchLabel = new JLabel("SEARCH");
         searchLabel.setForeground(MUTED);
         searchLabel.setFont(new Font("Segoe UI", Font.BOLD, 10));
         filterBar.add(levelLabel);
         filterBar.add(levelCombo);
+        filterBar.add(sourceLabel);
+        filterBar.add(sourceCombo);
         filterBar.add(searchLabel);
         filterBar.add(searchField);
         filterBar.add(applyButton);
@@ -296,8 +474,7 @@ public class Dashboard extends JFrame {
         table.getColumnModel().getColumn(3).setPreferredWidth(420);
 
         JScrollPane scroll = new JScrollPane(table);
-        scroll.getViewport().setBackground(PANEL);
-        scroll.setBorder(BorderFactory.createLineBorder(LINE));
+        styleScrollPane(scroll);
         panel.add(filterBar, BorderLayout.NORTH);
         panel.add(scroll, BorderLayout.CENTER);
         return panel;
@@ -311,17 +488,38 @@ public class Dashboard extends JFrame {
                 BorderFactory.createLineBorder(LINE), new EmptyBorder(6, 8, 6, 8)));
     }
 
+    private void updateSourceCombo() {
+        java.util.List<String> sources = analyzer.sourceNames();
+        java.util.List<String> items = new java.util.ArrayList<>();
+        items.add("ALL SOURCES");
+        items.addAll(sources);
+        if (sourceCombo == null) {
+            return;
+        }
+        String selected = (String) sourceCombo.getSelectedItem();
+        sourceCombo.removeAllItems();
+        for (String item : items) {
+            sourceCombo.addItem(item);
+        }
+        if (selected != null && items.contains(selected)) {
+            sourceCombo.setSelectedItem(selected);
+        } else {
+            sourceCombo.setSelectedIndex(0);
+        }
+    }
+
     private JPanel buildStatsPanel() {
         JPanel panel = titledPanel("LIVE ANALYTICS");
         statsArea = new JTextArea();
         statsArea.setEditable(false);
-        statsArea.setLineWrap(false);
+        statsArea.setLineWrap(true);
+        statsArea.setWrapStyleWord(true);
         statsArea.setFont(new Font("Consolas", Font.PLAIN, 12));
         statsArea.setForeground(new Color(190, 211, 232));
         statsArea.setBackground(new Color(9, 15, 26));
         statsArea.setBorder(new EmptyBorder(12, 12, 12, 12));
         JScrollPane scroll = new JScrollPane(statsArea);
-        scroll.setBorder(BorderFactory.createLineBorder(LINE));
+        styleScrollPane(scroll);
         scroll.getViewport().setBackground(new Color(9, 15, 26));
         panel.add(scroll, BorderLayout.CENTER);
         return panel;
@@ -460,6 +658,7 @@ public class Dashboard extends JFrame {
                     appendRow(entry);
                 }
             }
+            updateSourceCombo();
             while (tableModel.getRowCount() > MAX_ROWS) {
                 tableModel.removeRow(0);
             }
@@ -530,6 +729,10 @@ public class Dashboard extends JFrame {
             filter = filter.and(LogFilter.minLevel(LogLevel.WARN));
         } else if (selected != null && !"ALL".equals(selected)) {
             filter = filter.and(LogFilter.byLevel(LogLevel.fromString(selected)));
+        }
+        String source = (String) sourceCombo.getSelectedItem();
+        if (source != null && !"ALL SOURCES".equals(source)) {
+            filter = filter.and(LogFilter.bySource(source));
         }
         String text = searchField.getText().trim();
         if (!text.isEmpty()) {
